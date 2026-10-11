@@ -32,7 +32,7 @@ from typing import Any, Iterable, Mapping, Optional, Protocol, Sequence
 from uuid import uuid4
 
 
-CORE_VERSION = "0.1.0"
+CORE_VERSION = "0.3.0"
 
 
 def utc_now() -> str:
@@ -76,6 +76,23 @@ class EpistemicStatus(str, Enum):
     CONFIRMED = "confirmed"
     CONTRADICTED = "contradicted"
     REJECTED = "rejected"
+
+
+class AnswerMode(str, Enum):
+    """
+    Declared answer policy for a visible response/conclusion.
+
+    GENERAL_ANSWER: provide a useful answer at the ordinary level of scope.
+    BOUNDARY_EXPLORATION: explore limits, counterexamples, edge cases, or
+        the boundary where a generalization stops holding.
+    BOTH: provide the ordinary answer and explicitly probe its boundaries.
+    UNDECIDED: the policy has not yet been selected; should be resolved
+        before a final answer marker is emitted.
+    """
+    GENERAL_ANSWER = "general_answer"
+    BOUNDARY_EXPLORATION = "boundary_exploration"
+    BOTH = "both"
+    UNDECIDED = "undecided"
 
 
 @dataclass
@@ -182,6 +199,28 @@ class ChaseResult:
 
 
 @dataclass
+class FlowEvent:
+    """
+    One explicitly marked, externally recordable step in a problem-solving trace.
+
+    `summary` and `payload` should contain visible observations or a user's
+    own process notes, not claims to expose hidden model reasoning.
+    """
+    event_id: str
+    session_id: str
+    sequence: int
+    marker: str
+    summary: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    parent_event_ids: list[str] = field(default_factory=list)
+    branch_id: Optional[str] = None
+    answer_mode: Optional[str] = None
+    links: list[dict[str, str]] = field(default_factory=list)
+    source: str = "manual"
+    timestamp: str = field(default_factory=utc_now)
+
+
+@dataclass
 class Branch:
     branch_id: str = field(default_factory=lambda: str(uuid4()))
     parent_branch_id: Optional[str] = None
@@ -254,6 +293,7 @@ class ConnectCore:
         self.records: dict[str, IndexRecord] = {}
         self.revisions: list[RevisionEvent] = []
         self.snapshots: dict[str, list[StateSnapshot]] = {}
+        self.flow_events: dict[str, list[FlowEvent]] = {}
         self.branches: dict[str, Branch] = {}
         self.modules: dict[str, ConnectModule] = {}
 
@@ -471,6 +511,176 @@ class ConnectCore:
                     return candidate
         raise KeyError(f"unknown snapshot_id: {snapshot}")
 
+    # ---------- Marked flow / WASHAWASHA Chase ----------
+
+    def mark_flow(
+        self,
+        session_id: str,
+        marker: str,
+        summary: str,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        parent_event_ids: Optional[Sequence[str]] = None,
+        branch_id: Optional[str] = None,
+        answer_mode: Optional[str | AnswerMode] = None,
+        links: Optional[Sequence[Mapping[str, str]]] = None,
+        source: str = "manual",
+    ) -> FlowEvent:
+        """
+        Append an explicit flow marker to a session.
+
+        Suggested marker vocabulary (not enforced):
+          INPUT, OBSERVE, HYPOTHESIS, BRANCH, TRANSFORM, RETURN,
+          COMPARE, CONVERGE, CONCLUDE, UNKNOWN, FAIL, PRESERVE_UNKNOWN.
+
+        Parent IDs and links preserve non-linear paths. Use a link such as
+        {"relation": "returns_to", "target_event_id": "..."} to mark a return.
+        Markers record the visible trace; they do not claim to reveal hidden
+        chain-of-thought.
+        """
+        if not session_id.strip():
+            raise ValueError("session_id must not be empty")
+        if not marker.strip():
+            raise ValueError("marker must not be empty")
+
+        normalized_marker = marker.strip().upper()
+        final_markers = {"ANSWER", "CONCLUDE", "FINAL"}
+        normalized_answer_mode: Optional[str] = None
+        if answer_mode is not None:
+            normalized_answer_mode = (
+                answer_mode.value if isinstance(answer_mode, AnswerMode)
+                else str(answer_mode).strip().lower()
+            )
+            allowed_modes = {item.value for item in AnswerMode}
+            if normalized_answer_mode not in allowed_modes:
+                raise ValueError(
+                    f"answer_mode must be one of {sorted(allowed_modes)}"
+                )
+        if normalized_marker in final_markers and normalized_answer_mode is None:
+            raise ValueError(
+                f"marker={normalized_marker!r} requires answer_mode "
+                "(general_answer / boundary_exploration / both / undecided)"
+            )
+        if normalized_marker in final_markers and normalized_answer_mode == AnswerMode.UNDECIDED.value:
+            # Keep it representable for experiments, but flag the unresolved
+            # policy in the trace so it cannot be mistaken for an explicit choice.
+            pass
+
+        history = self.flow_events.setdefault(session_id, [])
+        known_ids = {event.event_id for event in history}
+        parents = list(parent_event_ids or [])
+        for parent_id in parents:
+            if parent_id not in known_ids:
+                raise KeyError(
+                    f"parent event {parent_id!r} is not in session {session_id!r}"
+                )
+
+        normalized_links: list[dict[str, str]] = []
+        for link in links or []:
+            if "relation" not in link or "target_event_id" not in link:
+                raise ValueError("each link needs 'relation' and 'target_event_id'")
+            target = str(link["target_event_id"])
+            if target not in known_ids:
+                raise KeyError(
+                    f"link target {target!r} is not in session {session_id!r}"
+                )
+            normalized_links.append({
+                "relation": str(link["relation"]),
+                "target_event_id": target,
+            })
+
+        if branch_id is not None and branch_id not in self.branches:
+            raise KeyError(f"unknown branch_id: {branch_id}")
+
+        event = FlowEvent(
+            event_id=str(uuid4()),
+            session_id=session_id,
+            sequence=len(history) + 1,
+            marker=normalized_marker,
+            summary=summary,
+            payload=json.loads(canonical_json(dict(payload or {}))),
+            parent_event_ids=parents,
+            branch_id=branch_id,
+            answer_mode=normalized_answer_mode,
+            links=normalized_links,
+            source=source,
+        )
+        history.append(event)
+        return event
+
+    def chase_flow(self, session_id: str) -> dict[str, Any]:
+        """
+        Return a trace suitable for reviewing marked problem-solving flow.
+
+        Adjacent payload diffs are mechanical. Branches, returns and merges
+        are counted only when explicitly marked/linked, not guessed.
+        """
+        history = list(self.flow_events.get(session_id, []))
+        if not history:
+            raise ValueError(f"no flow events for session_id: {session_id}")
+
+        marker_counts: dict[str, int] = {}
+        answer_mode_counts: dict[str, int] = {}
+        unresolved_answer_policy_event_ids: list[str] = []
+        branch_ids: set[str] = set()
+        links: list[dict[str, str]] = []
+        transitions: list[dict[str, Any]] = []
+
+        for event in history:
+            marker_counts[event.marker] = marker_counts.get(event.marker, 0) + 1
+            if event.answer_mode is not None:
+                answer_mode_counts[event.answer_mode] = (
+                    answer_mode_counts.get(event.answer_mode, 0) + 1
+                )
+                if event.answer_mode == AnswerMode.UNDECIDED.value:
+                    unresolved_answer_policy_event_ids.append(event.event_id)
+            if event.branch_id:
+                branch_ids.add(event.branch_id)
+            for link in event.links:
+                links.append({
+                    "from_event_id": event.event_id,
+                    "relation": link["relation"],
+                    "to_event_id": link["target_event_id"],
+                })
+
+        for previous, current in zip(history, history[1:]):
+            payload_diff = _diff_values(previous.payload, current.payload)
+            transitions.append({
+                "from_event_id": previous.event_id,
+                "to_event_id": current.event_id,
+                "from_marker": previous.marker,
+                "to_marker": current.marker,
+                "payload_changed": bool(payload_diff),
+                "payload_diff": [asdict(item) for item in payload_diff],
+            })
+
+        return {
+            "session_id": session_id,
+            "event_count": len(history),
+            "marker_counts": marker_counts,
+            "answer_mode_counts": answer_mode_counts,
+            "unresolved_answer_policy_event_ids": unresolved_answer_policy_event_ids,
+            "branch_count": len(branch_ids),
+            "explicit_return_count": sum(
+                link["relation"] in {"returns_to", "backtracks_to"}
+                for event in history for link in event.links
+            ),
+            "explicit_convergence_count": sum(
+                link["relation"] in {"converges_with", "merges_into"}
+                for event in history for link in event.links
+            ),
+            "events": [asdict(event) for event in history],
+            "links": links,
+            "transitions": transitions,
+            "limitations": [
+                "Only explicitly marked events and links are represented.",
+                "A recorded trace is not a transcript of hidden model reasoning.",
+                "Payload differences do not by themselves imply drift, error, or progress.",
+                "ANSWER/CONCLUDE/FINAL events require an explicit answer_mode.",
+                "UNDECIDED is recorded as unresolved, not as a valid policy choice.",
+            ],
+        }
+
     # ---------- Thought branches ----------
 
     def create_branch(
@@ -558,6 +768,10 @@ class ConnectCore:
                 subject_id: [asdict(snapshot) for snapshot in history]
                 for subject_id, history in self.snapshots.items()
             },
+            "flow_events": {
+                session_id: [asdict(event) for event in history]
+                for session_id, history in self.flow_events.items()
+            },
             "branches": [asdict(branch) for branch in self.branches.values()],
         }
 
@@ -598,12 +812,43 @@ if __name__ == "__main__":
     )
     chase_result = core.chase("probe-01")
 
+    # Explicitly mark a visible problem-solving trace. This is a trace protocol,
+    # not an attempt to extract hidden internal reasoning.
+    e0 = core.mark_flow(
+        "probe-flow-01", "INPUT", "Problem received",
+        payload={"problem": "Track answer drift", "constraints": ["visible data only"]},
+    )
+    e1 = core.mark_flow(
+        "probe-flow-01", "HYPOTHESIS", "Possible change in assumptions",
+        payload={"hypotheses": ["assumption changed"], "unknowns": ["cause"]},
+        parent_event_ids=[e0.event_id],
+    )
+    e2 = core.mark_flow(
+        "probe-flow-01", "RETURN", "Revisit original problem",
+        payload={"problem": "Track answer drift", "unknowns": ["cause"]},
+        parent_event_ids=[e1.event_id],
+        links=[{"relation": "returns_to", "target_event_id": e0.event_id}],
+    )
+    core.mark_flow(
+        "probe-flow-01", "ANSWER", "Provide ordinary answer and note limits",
+        payload={"answer_summary": "Visible answer summary", "limits": ["cause unresolved"]},
+        parent_event_ids=[e2.event_id],
+        answer_mode=AnswerMode.BOTH,
+    )
+    flow_trace = core.chase_flow("probe-flow-01")
+
     left = core.create_branch("hypothesis-A", forked_from_record_id=issue.record_id)
     right = core.create_branch("hypothesis-B", forked_from_record_id=issue.record_id)
     core.attach_record_to_branch(left.branch_id, issue.record_id)
 
     print("Chase changed:", chase_result.changed)
     print("Chase summary:", chase_result.summary)
+    print("Flow trace:", {
+        "event_count": flow_trace["event_count"],
+        "marker_counts": flow_trace["marker_counts"],
+        "answer_mode_counts": flow_trace["answer_mode_counts"],
+        "explicit_return_count": flow_trace["explicit_return_count"],
+    })
     print("Branch comparison:", core.compare_branches(left.branch_id, right.branch_id))
     print("Identity self-check:", core.check_identity(issue, issue))
     # Uncomment to inspect the portable serialized structure:
