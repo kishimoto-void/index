@@ -1,208 +1,164 @@
-# Index Hybrid
+# W1 v0.1 — WASHAWASHA Structure Analyzer
 
-> **これは、作者本人が使いやすいと感じる形に設計した個人向けの実験的フレームワークです。**
->
-> この構造を誰にとっても最適な標準形だと主張するものではありません。作者自身の作業方法・考え方・実験の進め方に合わせた設計であり、利用者は目的に応じて自由に変更できます。
+**Status:** Specification draft / v0.1  
+**Purpose:** Analyze externally observable response structure as a flowchart, explicitly accounting for branches, assumptions, and the stated or inferred reasons for them.
 
-## 概要
+## 1. Purpose
 
-Index Hybrid
-は、情報の参照、現在状態の管理、実験・検証記録を分離し、LLMとの探索や理論更新を扱いやすくするための実験的な構造です。
+W1 v0.1 turns a target LLM response (and any available prompt/context) into a structured analysis:
 
-過去の情報を無制限に現行コンテキストへ積み上げるのではなく、現在の探索に必要な状態を扱いやすく保ち、必要になったときに過去の理論や実験を参照できることを目指します。
+1. A flowchart of observable stages and transitions.
+2. A branch inventory, including branch count, location, alternatives, and reasons.
+3. Two separate assumption ledgers:
+   - **Explicit assumptions:** assumptions stated directly in the response or supplied context.
+   - **Inferred assumptions:** assumptions the analyst believes may be required to explain the response structure, but which are not explicitly stated.
+4. Evidence and uncertainty labels that prevent interpretations from being presented as observed facts.
+5. A summary suitable for later hypothesis generation about the conditions that may produce “WASHAWASHA” (branching, reformulation, assumption changes, return, drift, and related observable transitions).
 
-**探索・実行と、採用・確定を分離します。**
-LLMや実行モジュールは候補を生成・検証できますが、現行状態として採用するかどうかは人間が判断します。
+W1 does **not** claim to expose a model's private internal reasoning. It analyzes only available external evidence: prompts, response text, tool-visible actions/logs, and explicit intermediate artifacts supplied for analysis.
 
-## 設計方針
+## 2. Non-goals
 
--   **人間が採用を決める。** `=`
-    は、その時点で人間が採用すると判断した状態を確定する操作です。
--   **`=` は真実の保証ではない。**
-    その時点の意思決定を記録するものであり、客観的な正しさを永久に保証するものではありません。
--   **現行理論は更新可能にする。**
-    古い理論をすべて現行状態に積み上げず、必要に応じて新しい理論へ更新します。
--   **過去の記録はArchiveへ退避する。**
-    現行状態を軽く保ちつつ、過去の理論・実験・棄却案を後から参照できるようにします。
--   **記憶と実行を分離する。**
-    実行モジュールが探索・処理を行っても、それだけで記憶が確定・更新されるわけではありません。
--   **未知を無理に埋めない。** FACTΔ と unknownΔ
-    を区別し、未確認・矛盾・根拠不足を未解決のまま保持できるようにします。
--   **初期段階では手動運用を優先する。**
-    GitHubへの保存やアーカイブは、まず人間が手動で行います。自動永続化やデータベースは、必要性が確認できてから検討します。
+- Do not claim to recover hidden chain-of-thought or internal computation.
+- Do not invent a branch merely because a response could have taken another path.
+- Do not treat a plausible explanation as a verified cause.
+- Do not merge branch count and assumption count.
+- Do not equate a branch, a hypothesis, an assumption, and a conclusion.
+- Do not force every response into a branching pattern.
+- Do not score an answer as good/bad unless a separate evaluation task explicitly requests it.
 
-## 3層構造
+## 3. Core concepts
 
-### Layer 1 --- γ-index
+### 3.1 Observable stage
 
-**役割：索引・参照・対象の特定**
+A response segment or externally evidenced operation, such as defining the question, introducing a condition, comparing alternatives, revising a premise, returning to an earlier issue, or stating a conclusion.
 
--   プロジェクト、論点、トピックを識別する
--   関連ファイル・記録・実験への参照を持つ
--   必要な情報へ到達する入口になる
+Each stage should cite its supporting text or artifact. If stage order cannot be established from the evidence, mark the order as uncertain.
 
-γ-index
-は、情報そのものをすべて抱え込む場所ではなく、対象と参照先を見つけるための索引として扱います。
+### 3.2 Branch
 
-### Layer 2 --- Δ-index
+A point where the response explicitly or observably distinguishes two or more alternative paths, cases, interpretations, conditions, or outcomes.
 
-**役割：現行状態・差分・未解決事項の管理**
+- Count **branch points** separately from **outgoing branches/alternatives**.
+- Report both values where possible.
+- A list of options is not automatically evidence that the model internally explored every option. Describe it as an output-level alternative set.
+- If the response presents a single path and no observable alternatives, report `confirmed_branch_points = 0` and note the evidence scope; do not infer that no internal branching occurred.
 
-#### FACTΔ
+### 3.3 Assumption
 
-根拠や観測によって確認された情報・状態を扱います。出典、観測条件、適用範囲など、判断の根拠を可能な限り参照できるようにします。
+A proposition accepted provisionally for the purpose of analysis or answering.
 
-FACTΔ
-は絶対的・永久的な真実を意味しません。新しい根拠や反証によって再評価される可能性があります。
+**Explicit assumption:** directly stated as an assumption, condition, supposition, simplification, or provisional premise.
 
-#### unknownΔ
+**Inferred assumption:** not stated as an assumption, but appears necessary to explain a step, transition, or conclusion. Inferred assumptions must be marked as interpretations, include rationale, and have confidence/uncertainty noted.
 
-まだ確定できない情報、未検証の主張、矛盾、根拠不足などを扱います。未知の情報を都合よく補完し、確定事項として扱うことを避けるための領域です。
+Do not count ordinary factual claims as assumptions merely because they could be wrong. If unclear whether an item is an assumption, place it in `uncertain_items` rather than forcing classification.
 
-FACTΔ / unknownΔ
-の分類は、最初から完全に固定された自動判定体系とはしません。人間とLLMが分類案や根拠を確認し、必要に応じて判断・修正します。LLMの分類結果だけで確定したことにはしません。
+### 3.4 Reason
 
-### Layer 3 --- Experimentis
+A reason is an explanation for why a branch or assumption appears in the response. Separate:
+- `stated_reason`: reason explicitly given in the source response/context.
+- `analyst_interpretation`: a plausible interpretation based on observable evidence.
+- `unknown`: no supported reason can be assigned.
 
-**役割：実験・観測・検証記録**
+Do not state that a reason is the model's actual internal cause unless independently evidenced. Prefer phrasing such as “the response states…”, “the structure is consistent with…”, and “cause unknown from available evidence.”
 
--   実験条件、入力、出力、観測結果
--   仮説、反証、失敗、棄却案
--   再現性や未検証事項
--   Δ-index の状態更新を判断するための根拠
--   現行理論の変更に関係する記録
+## 4. Required output
 
-Experimentis
-は、現行状態そのものと、状態を支える実験記録を分けるための層です。実験結果が存在することと、その結果から導いた解釈が正しいことは同一視しません。
+Every full analysis must contain the following sections in order:
 
-## ラックモジュール：記憶と実行の分離
+1. **Scope and evidence**
+   - Target prompt/context available
+   - Response/artifacts analyzed
+   - Missing evidence and limitations
+2. **Flowchart**
+   - Mermaid flowchart or equivalent node-edge representation
+   - Evidence references for nodes and edges
+   - Uncertain edges marked explicitly
+3. **Branch inventory**
+   - Branch ID and location
+   - Branch point count
+   - Number of observable alternatives
+   - Alternatives and evidence
+   - Stated reason / analyst interpretation / unknown
+4. **Assumption ledger — explicit**
+   - ID, assumption, evidence, introduction point, status, downstream influence
+5. **Assumption ledger — inferred**
+   - ID, inferred assumption, evidence supporting inference, rationale, confidence, alternatives, status
+6. **Transition and return analysis**
+   - Reformulations, premise changes, abstraction shifts, substitutions, return to earlier issue, drift-like changes, unresolved transitions
+7. **Counts and accounting**
+   - Confirmed branch points
+   - Observable alternatives across branch points (do not conflate with branch points)
+   - Explicit assumption count
+   - Inferred assumption count
+   - Uncertain/unclassified candidate count
+   - Counts are scoped to the supplied evidence
+8. **Unknowns and counter-interpretations**
+9. **Structured JSON**
+   - Valid JSON conforming to the schema in `schema/w1_analysis.schema.json` (when available)
 
-ラックモジュールは Layer
-2（Δ-index）に関係する実行機構として位置づけます。ただし、**ラックモジュール自体を記憶領域と同一視しません**。
+## 5. Counting rules
 
--   **記憶側：**
-    FACTΔ、unknownΔ、現行状態、確定されたスナップショットなどを管理する
--   **実行側：** 状態を参照して探索・分析・処理を行い、候補や結果を返す
--   **反映：** 実行結果だけで現行状態を自動確定せず、人間の判断を待つ
+- **Branch point count:** number of distinct evidenced locations where at least two alternatives are represented.
+- **Alternative count:** number of outgoing options represented at each branch point; report per point and optionally total.
+- **Explicit assumption count:** number of unique explicit assumptions. Repetition of the same assumption does not create a new assumption unless its meaning changes.
+- **Inferred assumption count:** number of distinct inferred assumptions, kept separate from explicit assumptions.
+- **Uncertain candidate count:** items that may be assumptions or branches but lack enough evidence for classification.
+- One assumption can support several branches; one branch can involve several assumptions. Never force a one-to-one mapping.
+- Deduplicate semantically equivalent items, preserving links to all occurrences.
+- If no evidence is supplied for a count, use `null` or “not assessable,” not an invented zero.
+- Counts describe the analyzed artifact, not the model's complete internal process.
 
-実行モジュールは交換・改良できる一方、記憶の形式や確定ルールは独立して管理できることを目指します。
+## 6. Evidence and confidence
 
-## `=`：人間によるスナップショット確定
+Use evidence IDs (e.g., `E1`, `E2`) tied to exact quotes or short paraphrases with a location/segment identifier. Prefer short excerpts; do not reproduce irrelevant source text.
 
-`=`
-は、**その時点で人間が採用すると判断した状態を確定する操作**として扱います。
+Suggested confidence labels:
+- `high`: directly supported by clear, unambiguous evidence.
+- `medium`: reasonable interpretation supported by evidence, with plausible alternatives.
+- `low`: weakly supported or highly ambiguous.
+- `unknown`: evidence is insufficient.
 
-`=`
-は、内容が客観的に正しいと証明されたこと、将来も変更してはならないこと、LLMが自動で永続記憶にしてよいことを意味しません。
+Confidence describes the analysis claim, not the correctness of the original answer.
 
-採用の確定、事実としての検証、保存の成功は別の概念です。必要に応じて、それぞれの状態を区別します。
+## 7. Suggested workflow
 
-基本フロー：
+1. Freeze the target prompt/context and response artifact.
+2. Segment the response into observable stages.
+3. Identify only evidenced transitions and branch points.
+4. Inventory explicit assumptions.
+5. Separately propose inferred assumptions; justify each one.
+6. Attach stated reasons or clearly labeled interpretations to each branch/assumption.
+7. Build the flowchart from the inventory, not from a preconceived narrative.
+8. Count and cross-check items.
+9. Search for counter-interpretations and missing evidence.
+10. Emit the structured report and JSON.
 
-1.  LLMやラックモジュールが探索・分析し、候補を提示する
-2.  FACTΔ / unknownΔ、根拠、未解決事項を確認する
-3.  人間が採用する状態を判断する
-4.  人間が `=` を決定する
-5.  確定した状態を現行理論へ反映する
-6.  旧理論や関連実験を必要に応じてArchiveへ移す
+## 8. Relationship to later W1 stages
 
-## ロールバック
+- **B — mechanism hypotheses:** may use multiple W1 reports to propose candidate structures that could generate observed patterns. B remains a hypothesis, not a fact.
+- **LLM audit:** checks coherence, alternative explanations, falsifiability, and whether proposed tests can distinguish hypotheses. LLM agreement is not proof.
+- **A — efficient observation plan:** chooses the smallest useful set of observations/interventions that distinguishes competing B hypotheses.
+- **Δindex:** may classify claims by evidence maturity, but must preserve uncertainty and provenance.
 
-ロールバックは、現行状態を以前のスナップショットへ戻すための操作です。
+## 9. Initial validation tests
 
--   新しい理論で問題が発生した場合、以前の状態を再採用できる
--   ロールバックと履歴削除は別の操作として扱う
--   旧理論を再採用しても、その後に発生した実験記録を自動削除しない
--   可能であれば、ロールバックの理由と参照先スナップショットを記録する
+A v0.1 implementation should pass at least these cases:
 
-過去の理論は「永久に誤りと決まったもの」ではありません。新しい条件や証拠の下で再検証できるようにします。
+1. **Single-path response:** no observable branch point; no forced branch.
+2. **Explicit alternatives:** one branch point with two or more alternatives.
+3. **Explicit assumption:** counted only in explicit ledger.
+4. **Inferred assumption:** counted only in inferred ledger and accompanied by rationale.
+5. **Repeated assumption:** semantically duplicate mentions deduplicated, occurrences retained.
+6. **Branch without assumption:** branch count increases; assumption count need not.
+7. **Assumption supporting multiple branches:** assumption counted once and linked to multiple branches.
+8. **Unknown reason:** marked unknown, not fabricated.
+9. **Conflicting evidence:** conflict retained and confidence lowered.
+10. **No prompt or incomplete context:** scope limitation reported.
+11. **Post-hoc rationalization risk:** reasons from the response are labeled as stated reasons, not confirmed internal causes.
+12. **Invalid or ambiguous flow order:** uncertain edge/order recorded instead of guessed.
 
-## 現行状態とArchive
+## 10. Version boundary
 
-現行理論は、次の探索で直接利用する状態です。古い理論や実験記録をすべて現行状態へ残し続けることは目的にしません。
-
-構成例（実際のファイル名やディレクトリ構成は実装に合わせて変更できます）：
-
-``` text
-Index/
-├── README.md
-├── γ-index/
-│   └── references.json
-├── Δ-index/
-│   ├── FACTΔ.json
-│   ├── unknownΔ.json
-│   └── current_state.json
-├── rack/
-│   ├── executor.py
-│   └── rules.json
-└── Experiment/
-    ├── current/
-    │   └── current_theory.md
-    └── Archive/
-        ├── experiments/
-        ├── theories/
-        ├── rejected/
-        └── manifests/
-```
-
-Archive
-には、必要に応じて旧理論、実験結果、棄却案、変更理由、版情報、関連IDなどを残します。現行状態からは退避しても、再参照できることを重視します。
-
-## 保存方針：初期段階は手動
-
-初期段階では、自動永続化やデータベースを必須にしません。人間が区切りのよい段階で
-GitHub にコミットし、現行状態とアーカイブを管理します。
-
-Git のコミット履歴と Index
-のスナップショットは役割が異なります。必要に応じて、スナップショットとコミットIDを相互参照できるようにします。
-
-自動保存やデータベースの導入は、運用上の必要性が明確になってから検討します。
-
-## 基本フロー
-
-``` text
-INPUT
-  ↓
-γ-index：対象・参照先を特定
-  ↓
-Δ-index：FACTΔ / unknownΔ と現行状態を確認
-  ↓
-ラックモジュール：探索・分析・実行
-  ↓
-Experimentis：結果・反証・未解決事項を記録
-  ↓
-LLM：候補・根拠・差分を提示
-  ↓
-人間：採用する状態を判断
-  ↓
-「=」
-  ↓
-現行理論を更新
-  ├─ 旧理論・関連実験 → Archive
-  └─ 必要に応じてロールバック可能な状態を保持
-  ↓
-次の探索へ
-```
-
-## 現段階の制約と未確定事項
-
-本設計は、運用しながら検証・改良するための設計案です。以下は実装・実験を通じて具体化します。
-
--   FACTΔ / unknownΔ の詳細な分類規則
--   スナップショットの具体的なデータ形式
--   ロールバック時の参照整合性
--   γ-index と各記録の参照整合性
--   ラックモジュールの入出力契約
--   Archive のメタデータと再検証手順
--   GitHub上でのファイル構成・更新運用
--   各機構が情報混同や論点ドリフトを実際に減らすかどうか
-
-この構造を採用しただけで、LLMの回答精度やドリフト耐性が自動的に向上するとは主張しません。効果は比較可能なテストによって確認します。
-
-## この設計について
-
-このREADMEは、**作者本人が使いやすいと考える作業方法を起点にまとめたもの**です。普遍的な正解や唯一の推奨アーキテクチャとして提示するものではありません。
-
-利用者は、自分の目的・環境・作業方法に合わせて、層の構成、分類方法、保存方式、実行モジュールなどを自由に変更できます。ここで重視しているのは、作者にとって扱いやすいこと、構造を追跡できること、未知を無理に確定しないこと、そして人間が採用判断を管理できることです。
-
-**現行理論は更新する。実験の根拠は必要に応じて残す。採用は人間が決める。**
+v0.1 defines the analysis contract and prompt behavior. It does not prescribe a particular model, runtime, graph library, or automatic parser. Keep the output schema stable where practical and version future breaking changes explicitly.
