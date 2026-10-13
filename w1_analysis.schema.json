@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "W1 v0.1 Analysis Summary",
+  "type": "object",
+  "required": [
+    "version",
+    "scope",
+    "counts",
+    "branches",
+    "explicit_assumptions",
+    "inferred_assumptions",
+    "uncertain_items",
+    "evidence",
+    "unknowns",
+    "counter_interpretations"
+  ],
+  "properties": {
+    "version": { "const": "W1-0.1" },
+    "scope": {
+      "type": "object",
+      "required": ["target_id", "materials_available", "limitations"],
+      "properties": {
+        "target_id": { "type": ["string", "null"] },
+        "materials_available": { "type": "array", "items": { "type": "string" } },
+        "limitations": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "confirmed_branch_points",
+        "observable_alternatives_total",
+        "explicit_assumptions_unique",
+        "inferred_assumptions_unique",
+        "uncertain_candidates",
+        "not_assessable_fields"
+      ],
+      "properties": {
+        "confirmed_branch_points": { "type": ["integer", "null"], "minimum": 0 },
+        "observable_alternatives_total": { "type": ["integer", "null"], "minimum": 0 },
+        "explicit_assumptions_unique": { "type": ["integer", "null"], "minimum": 0 },
+        "inferred_assumptions_unique": { "type": ["integer", "null"], "minimum": 0 },
+        "uncertain_candidates": { "type": ["integer", "null"], "minimum": 0 },
+        "not_assessable_fields": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "branches": { "type": "array", "items": { "type": "object" } },
+    "explicit_assumptions": { "type": "array", "items": { "type": "object" } },
+    "inferred_assumptions": { "type": "array", "items": { "type": "object" } },
+    "uncertain_items": { "type": "array", "items": { "type": "object" } },
+    "evidence": { "type": "array", "items": { "type": "object" } },
+    "unknowns": { "type": "array", "items": { "type": "string" } },
+    "counter_interpretations": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}
