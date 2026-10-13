@@ -1,177 +1,208 @@
 # Index Hybrid
 
-**A small, extensible index for carrying context across projects, experiments, and LLM sessions.**
+> **これは、作者本人が使いやすいと感じる形に設計した個人向けの実験的フレームワークです。**
+>
+> この構造を誰にとっても最適な標準形だと主張するものではありません。作者自身の作業方法・考え方・実験の進め方に合わせた設計であり、利用者は目的に応じて自由に変更できます。
 
-Index Hybrid formalizes the original **Instant Index** idea: record what matters, retrieve only what is relevant, ask an AI or another tool for a useful next action, then append the observed result.
+## 概要
 
-> **Keep the shared data contract stable; make learning, exploration, and evaluation replaceable.**
+Index Hybrid
+は、情報の参照、現在状態の管理、実験・検証記録を分離し、LLMとの探索や理論更新を扱いやすくするための実験的な構造です。
 
-The project is intended to be easy to copy, personalize, and modify. It does not require a particular LLM, programming language, database, directory layout, or paid service.
+過去の情報を無制限に現行コンテキストへ積み上げるのではなく、現在の探索に必要な状態を扱いやすく保ち、必要になったときに過去の理論や実験を参照できることを目指します。
 
-## Why Index?
+**探索・実行と、採用・確定を分離します。**
+LLMや実行モジュールは候補を生成・検証できますが、現行状態として採用するかどうかは人間が判断します。
 
-Project context is often scattered across conversations, notes, experiments, and assumptions. Repeating that context wastes time and tokens; merging it carelessly can erase uncertainty or mix unrelated projects.
+## 設計方針
 
-Index is a **proposal memory**: record experience, consult the next action, act, then append the result.
+-   **人間が採用を決める。** `=`
+    は、その時点で人間が採用すると判断した状態を確定する操作です。
+-   **`=` は真実の保証ではない。**
+    その時点の意思決定を記録するものであり、客観的な正しさを永久に保証するものではありません。
+-   **現行理論は更新可能にする。**
+    古い理論をすべて現行状態に積み上げず、必要に応じて新しい理論へ更新します。
+-   **過去の記録はArchiveへ退避する。**
+    現行状態を軽く保ちつつ、過去の理論・実験・棄却案を後から参照できるようにします。
+-   **記憶と実行を分離する。**
+    実行モジュールが探索・処理を行っても、それだけで記憶が確定・更新されるわけではありません。
+-   **未知を無理に埋めない。** FACTΔ と unknownΔ
+    を区別し、未確認・矛盾・根拠不足を未解決のまま保持できるようにします。
+-   **初期段階では手動運用を優先する。**
+    GitHubへの保存やアーカイブは、まず人間が手動で行います。自動永続化やデータベースは、必要性が確認できてから検討します。
 
-It helps users:
+## 3層構造
 
-- preserve the current issue and objective;
-- distinguish observations, claims, hypotheses, experiments, and unknowns;
-- record what was tried and what actually happened;
-- retain failures, differences, and unresolved questions;
-- explore analogies across domains without treating resemblance as proof;
-- provide an AI with the smallest useful context for the next decision.
+### Layer 1 --- γ-index
 
-## Core loop
+**役割：索引・参照・対象の特定**
 
-```text
-INPUT → INDEX → RETRIEVAL → REASONING → PROPOSAL
-  ↑                                      ↓
-  └──────── OBSERVATION ← ACTION ←───────┘
+-   プロジェクト、論点、トピックを識別する
+-   関連ファイル・記録・実験への参照を持つ
+-   必要な情報へ到達する入口になる
+
+γ-index
+は、情報そのものをすべて抱え込む場所ではなく、対象と参照先を見つけるための索引として扱います。
+
+### Layer 2 --- Δ-index
+
+**役割：現行状態・差分・未解決事項の管理**
+
+#### FACTΔ
+
+根拠や観測によって確認された情報・状態を扱います。出典、観測条件、適用範囲など、判断の根拠を可能な限り参照できるようにします。
+
+FACTΔ
+は絶対的・永久的な真実を意味しません。新しい根拠や反証によって再評価される可能性があります。
+
+#### unknownΔ
+
+まだ確定できない情報、未検証の主張、矛盾、根拠不足などを扱います。未知の情報を都合よく補完し、確定事項として扱うことを避けるための領域です。
+
+FACTΔ / unknownΔ
+の分類は、最初から完全に固定された自動判定体系とはしません。人間とLLMが分類案や根拠を確認し、必要に応じて判断・修正します。LLMの分類結果だけで確定したことにはしません。
+
+### Layer 3 --- Experimentis
+
+**役割：実験・観測・検証記録**
+
+-   実験条件、入力、出力、観測結果
+-   仮説、反証、失敗、棄却案
+-   再現性や未検証事項
+-   Δ-index の状態更新を判断するための根拠
+-   現行理論の変更に関係する記録
+
+Experimentis
+は、現行状態そのものと、状態を支える実験記録を分けるための層です。実験結果が存在することと、その結果から導いた解釈が正しいことは同一視しません。
+
+## ラックモジュール：記憶と実行の分離
+
+ラックモジュールは Layer
+2（Δ-index）に関係する実行機構として位置づけます。ただし、**ラックモジュール自体を記憶領域と同一視しません**。
+
+-   **記憶側：**
+    FACTΔ、unknownΔ、現行状態、確定されたスナップショットなどを管理する
+-   **実行側：** 状態を参照して探索・分析・処理を行い、候補や結果を返す
+-   **反映：** 実行結果だけで現行状態を自動確定せず、人間の判断を待つ
+
+実行モジュールは交換・改良できる一方、記憶の形式や確定ルールは独立して管理できることを目指します。
+
+## `=`：人間によるスナップショット確定
+
+`=`
+は、**その時点で人間が採用すると判断した状態を確定する操作**として扱います。
+
+`=`
+は、内容が客観的に正しいと証明されたこと、将来も変更してはならないこと、LLMが自動で永続記憶にしてよいことを意味しません。
+
+採用の確定、事実としての検証、保存の成功は別の概念です。必要に応じて、それぞれの状態を区別します。
+
+基本フロー：
+
+1.  LLMやラックモジュールが探索・分析し、候補を提示する
+2.  FACTΔ / unknownΔ、根拠、未解決事項を確認する
+3.  人間が採用する状態を判断する
+4.  人間が `=` を決定する
+5.  確定した状態を現行理論へ反映する
+6.  旧理論や関連実験を必要に応じてArchiveへ移す
+
+## ロールバック
+
+ロールバックは、現行状態を以前のスナップショットへ戻すための操作です。
+
+-   新しい理論で問題が発生した場合、以前の状態を再採用できる
+-   ロールバックと履歴削除は別の操作として扱う
+-   旧理論を再採用しても、その後に発生した実験記録を自動削除しない
+-   可能であれば、ロールバックの理由と参照先スナップショットを記録する
+
+過去の理論は「永久に誤りと決まったもの」ではありません。新しい条件や証拠の下で再検証できるようにします。
+
+## 現行状態とArchive
+
+現行理論は、次の探索で直接利用する状態です。古い理論や実験記録をすべて現行状態へ残し続けることは目的にしません。
+
+構成例（実際のファイル名やディレクトリ構成は実装に合わせて変更できます）：
+
+``` text
+Index/
+├── README.md
+├── γ-index/
+│   └── references.json
+├── Δ-index/
+│   ├── FACTΔ.json
+│   ├── unknownΔ.json
+│   └── current_state.json
+├── rack/
+│   ├── executor.py
+│   └── rules.json
+└── Experiment/
+    ├── current/
+    │   └── current_theory.md
+    └── Archive/
+        ├── experiments/
+        ├── theories/
+        ├── rejected/
+        └── manifests/
 ```
 
-1. **Input** — Record an issue, question, observation, constraint, or result.
-2. **Index** — Store it with an identifier, type, status, source, and relationships.
-3. **Retrieval** — Select only the context needed for the current task.
-4. **Reasoning** — A person, LLM, or replaceable module analyzes that context.
-5. **Proposal** — Produce a next action, alternative, or experiment with rationale.
-6. **Action** — A person or external system decides whether to carry it out.
-7. **Observation** — Record the actual outcome, including failure or uncertainty.
+Archive
+には、必要に応じて旧理論、実験結果、棄却案、変更理由、版情報、関連IDなどを残します。現行状態からは退避しても、再参照できることを重視します。
 
-A proposal is not an executed action. An executed action is not automatically a successful result.
+## 保存方針：初期段階は手動
 
-## Standard three-layer view
+初期段階では、自動永続化やデータベースを必須にしません。人間が区切りのよい段階で
+GitHub にコミットし、現行状態とアーカイブを管理します。
 
-The layers are a **logical view**, not a required physical storage hierarchy.
+Git のコミット履歴と Index
+のスナップショットは役割が異なります。必要に応じて、スナップショットとコミットIDを相互参照できるようにします。
 
-| Layer | Purpose | Typical contents |
-|---|---|---|
-| **L1 — Issue / Objective** | Keep the target visible | Issue, objective, scope, constraints, success criteria |
-| **L2 — Current State / Analysis** | Describe current understanding | Facts, claims, hypotheses, contradictions, unknowns, next questions |
-| **L3 — Experience / Experiments** | Preserve what happened | Conditions, inputs, outputs, observations, differences, failures, reproducibility |
+自動保存やデータベースの導入は、運用上の必要性が明確になってから検討します。
 
-Entries can be linked across layers and reused by multiple issues. Prefer references to one canonical entry over independent copies that may drift apart.
+## 基本フロー
 
-## Stable core, replaceable modules
-
-```text
-                   INDEX HYBRID
-                        │
-              ┌─────────┴─────────┐
-              │   Core Contract   │
-              │ identity          │
-              │ provenance        │
-              │ status / revision │
-              │ validation        │
-              └─────────┬─────────┘
-                        │
-           ┌────────────┼────────────┐
-           │            │            │
-        Learning    Exploration   Evaluation
-        update      analogy       tests / metrics
-        proposals   branching     comparisons
-           └────────────┼────────────┘
-                        │
-                 Storage adapters
-              Markdown / JSON / DB
-                        │
-                 LLM / local harness
+``` text
+INPUT
+  ↓
+γ-index：対象・参照先を特定
+  ↓
+Δ-index：FACTΔ / unknownΔ と現行状態を確認
+  ↓
+ラックモジュール：探索・分析・実行
+  ↓
+Experimentis：結果・反証・未解決事項を記録
+  ↓
+LLM：候補・根拠・差分を提示
+  ↓
+人間：採用する状態を判断
+  ↓
+「=」
+  ↓
+現行理論を更新
+  ├─ 旧理論・関連実験 → Archive
+  └─ 必要に応じてロールバック可能な状態を保持
+  ↓
+次の探索へ
 ```
 
-- **Core Contract** — Defines shared record semantics and integrity rules. Ordinary modules cannot silently redefine it.
-- **Learning** — Proposes revisions based on evidence and differences between expectations and observations.
-- **Exploration** — Proposes branches, alternative hypotheses, and cross-domain analogies.
-- **Evaluation** — Checks consistency, evidence, reproducibility, task performance, and context efficiency.
-- **Adapters** — Connect the shared model to files, databases, LLMs, or local harnesses.
+## 現段階の制約と未確定事項
 
-Modules propose changes; the core validates them; storage commits accepted changes. Replacing a module must not silently rewrite historical results.
+本設計は、運用しながら検証・改良するための設計案です。以下は実装・実験を通じて具体化します。
 
-## Analogy without overclaiming
+-   FACTΔ / unknownΔ の詳細な分類規則
+-   スナップショットの具体的なデータ形式
+-   ロールバック時の参照整合性
+-   γ-index と各記録の参照整合性
+-   ラックモジュールの入出力契約
+-   Archive のメタデータと再検証手順
+-   GitHub上でのファイル構成・更新運用
+-   各機構が情報混同や論点ドリフトを実際に減らすかどうか
 
-A fishing experiment and an LLM prompt experiment might share a broad pattern:
+この構造を採用しただけで、LLMの回答精度やドリフト耐性が自動的に向上するとは主張しません。効果は比較可能なテストによって確認します。
 
-```text
-change a condition → observe a response → revise a hypothesis
-```
+## この設計について
 
-That resemblance can be useful, but it does not prove that the underlying mechanisms are identical. An analogy should preserve its proposed mappings, evidence, scope conditions, non-matching parts, counterexamples, and validation state.
+このREADMEは、**作者本人が使いやすいと考える作業方法を起点にまとめたもの**です。普遍的な正解や唯一の推奨アーキテクチャとして提示するものではありません。
 
-Exploration should be free to propose surprising connections. Evaluation should be free to reject them.
+利用者は、自分の目的・環境・作業方法に合わせて、層の構成、分類方法、保存方式、実行モジュールなどを自由に変更できます。ここで重視しているのは、作者にとって扱いやすいこと、構造を追跡できること、未知を無理に確定しないこと、そして人間が採用判断を管理できることです。
 
-## Minimal record
-
-```json
-{
-  "schema_version": "1.0.0",
-  "index_id": "idx_example_001",
-  "kind": "hypothesis",
-  "title": "Does changing condition X affect outcome Y?",
-  "content": "A testable statement with a defined scope.",
-  "status": "proposed",
-  "relations": [],
-  "evidence": [],
-  "provenance": {
-    "source_type": "user",
-    "source_id": null
-  },
-  "created_at": "2026-10-12T00:00:00Z",
-  "updated_at": "2026-10-12T00:00:00Z",
-  "revision": 1,
-  "extensions": {}
-}
-```
-
-This is an illustrative record. See [SPECIFICATION.md](SPECIFICATION.md) for the normative field definitions. Markdown is sufficient for a simple human workflow; JSON is useful when a local harness needs predictable parsing and validation.
-
-## Principles
-
-1. **Preserve provenance.** Distinguish user input, observation, external source, inference, and generated proposal.
-2. **Keep uncertainty visible.** Unknown, untested, and inconclusive are valid states.
-3. **Record differences, not only conclusions.** Preserve the prior state, observed result, and meaningful revision.
-4. **Keep projects separable.** Use explicit IDs and relations instead of merging unrelated context.
-5. **Separate proposal from execution.** Never report an action or test as completed unless it actually was.
-6. **Do not equate analogy with evidence.** Similarity is a hypothesis to test.
-7. **Keep the core small.** Put domain-specific fields in extensions or replaceable modules.
-8. **Minimize context.** Retrieve only information relevant to the current task.
-9. **Prefer inspectable records.** Human-readable Markdown and portable JSON are good starting points.
-10. **Support user freedom.** Personalization and local modification are expected.
-
-## What Index does not promise
-
-- It is not automatic or guaranteed persistent memory for an LLM.
-- Storing a record does not guarantee that it is true.
-- It does not require access to private model reasoning.
-- It does not make an analogy valid merely because two patterns look alike.
-- It does not require a specific toolchain, model, or storage service.
-- It does not autonomously execute real-world actions unless a separate system implements that capability.
-
-A local harness can enforce schema validation, revision handling, retrieval, and commit rules more reliably than prompt instructions alone.
-
-## Getting started
-
-1. Read [SPECIFICATION.md](SPECIFICATION.md).
-2. Create one entry for a current issue or objective.
-3. Add only the facts, hypotheses, and prior experiences needed for the task.
-4. Ask an AI or module to propose a next action and explain its rationale.
-5. Decide whether to perform the action.
-6. Append the actual result, including uncertainty or failure.
-7. Repeat from the updated index.
-
-Start with Markdown. Add JSON schemas, local retrieval, or module code only when there is a concrete need.
-
-## Repository map
-
-- `README.md` — purpose, concepts, and quick start.
-- `SPECIFICATION.md` — core contract and module boundaries.
-- `プロジェクトエギング/` — a domain-specific example project, kept separate from the general framework.
-
-## Status
-
-**Specification status: Draft 1.0.0.**
-
-This document describes the intended design. A written specification is not evidence of a working implementation. Schema validation, mutation controls, compatibility behavior, and benchmarks must be tested before claiming implementation conformance.
-
-## Contributing
-
-Personalization and experimentation are welcome. For proposed changes to the shared contract, explain the problem, compatibility impact, migration behavior, and tests. Domain-specific ideas should generally begin as examples, extensions, or modules rather than expanding the core prematurely.
+**現行理論は更新する。実験の根拠は必要に応じて残す。採用は人間が決める。**
